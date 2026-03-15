@@ -1,0 +1,11 @@
+{
+  "name": "diet-shopping-assistant",
+  "version": "0.1.0",
+  "description": "MVP web app para transformar planos nutricionais em listas de compras recorrentes.",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test"
+  }
+}

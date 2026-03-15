@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Diet Shopping Assistant</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="hero">
+        <div class="hero-copy">
+          <p class="eyebrow">Diet Shopping Assistant</p>
+          <h1>Transforme seu plano nutricional em uma lista de compras realista.</h1>
+          <p class="lede">
+            Cole seu plano ou envie um arquivo, revise a interpretacao e gere uma compra semanal com embalagens comuns no mercado brasileiro.
+          </p>
+        </div>
+        <div class="hero-card">
+          <div class="hero-stat">
+            <strong>MVP</strong>
+            <span>Texto, PDF, revisao manual e lista semanal.</span>
+          </div>
+          <div class="hero-stat">
+            <strong>Regra central</strong>
+            <span>Arredondar para cima para nao faltar alimento.</span>
+          </div>
+        </div>
+      </header>
+
+      <main class="layout">
+        <section class="panel">
+          <div class="panel-header">
+            <h2>1. Inserir plano</h2>
+            <span id="status-badge" class="badge muted">Aguardando entrada</span>
+          </div>
+          <label class="field">
+            <span>Plano em texto</span>
+            <textarea id="plan-text" rows="12" placeholder="Exemplo:
+Cafe da manha:
+2 ovos
+1 banana
+200 ml de leite
+
+Almoco:
+150 g de arroz integral
+120 g de peito de frango
+somente dias uteis 100 g de feijao"></textarea>
+          </label>
+          <label class="field">
+            <span>Ou envie um arquivo</span>
+            <input id="plan-file" type="file" accept=".txt,.pdf" />
+          </label>
+          <button id="parse-button" class="primary-button">Extrair itens do plano</button>
+          <p class="helper">PDF usa extracao best-effort nesta versao. Se vier ruim, cole o texto manualmente.</p>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <h2>2. Revisar itens</h2>
+            <button id="add-item-button" class="ghost-button" type="button">Adicionar item</button>
+          </div>
+          <div id="review-empty" class="empty-state">
+            Os itens extraidos aparecerao aqui para revisao manual.
+          </div>
+          <div id="review-table-wrapper" class="table-wrapper hidden">
+            <table class="review-table">
+              <thead>
+                <tr>
+                  <th>Refeicao</th>
+                  <th>Alimento</th>
+                  <th>Qtd.</th>
+                  <th>Unidade</th>
+                  <th>Freq./semana</th>
+                  <th>Observacao</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="review-body"></tbody>
+            </table>
+          </div>
+          <div class="review-actions">
+            <button id="save-review-button" class="secondary-button">Salvar revisao</button>
+            <button id="generate-button" class="primary-button">Gerar lista semanal</button>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <h2>3. Lista de compras</h2>
+            <span class="badge">Semanal</span>
+          </div>
+          <div id="shopping-empty" class="empty-state">
+            Sua lista resolvida por embalagem aparecera aqui.
+          </div>
+          <div id="shopping-list" class="shopping-list"></div>
+        </section>
+      </main>
+    </div>
+
+    <template id="row-template">
+      <tr>
+        <td><input data-field="mealLabel" /></td>
+        <td><input data-field="normalizedFood" /></td>
+        <td><input data-field="quantity" type="number" step="0.01" min="0" /></td>
+        <td>
+          <select data-field="unit">
+            <option value="unit">unidade</option>
+            <option value="g">g</option>
+            <option value="kg">kg</option>
+            <option value="ml">ml</option>
+            <option value="l">l</option>
+          </select>
+        </td>
+        <td><input data-field="frequencyPerWeek" type="number" min="1" max="21" /></td>
+        <td><input data-field="notes" /></td>
+        <td><button data-action="remove" class="icon-button" type="button">Remover</button></td>
+      </tr>
+    </template>
+
+    <script src="/app.js"></script>
+  </body>
+  </html>
