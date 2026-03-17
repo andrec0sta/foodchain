@@ -7,17 +7,19 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from .parser import parse_plan
+from .normalization import strip_accents
+from .parser import parse_plan, prepare_llm_meal_blocks
 from .plan import normalize_plan
 
 
-DEFAULT_MODEL = "gemini-2.5-flash"
+DEFAULT_MODEL = "gemini-2.5-flash-lite"
+FALLBACK_MODEL = "gemini-2.5-flash"
 DEFAULT_TIMEOUT_SECONDS = 60
+DEFAULT_THINKING_BUDGET = 0
 
 PLAN_RESPONSE_SCHEMA = {
     "type": "OBJECT",
     "properties": {
-        "summary": {"type": "STRING"},
         "warnings": {"type": "ARRAY", "items": {"type": "STRING"}},
         "items": {
             "type": "ARRAY",
@@ -26,15 +28,12 @@ PLAN_RESPONSE_SCHEMA = {
                 "properties": {
                     "mealLabel": {"type": "STRING"},
                     "originalFood": {"type": "STRING"},
-                    "normalizedFood": {"type": "STRING"},
                     "quantity": {"type": "NUMBER"},
-                    "unit": {"type": "STRING"},
+                    "unit": {"type": "STRING", "enum": ["g", "kg", "ml", "l", "unit"]},
                     "frequencyPerWeek": {"type": "NUMBER"},
                     "notes": {"type": "STRING"},
-                    "confidence": {"type": "NUMBER"},
-                    "ambiguityFlags": {"type": "ARRAY", "items": {"type": "STRING"}},
                 },
-                "required": ["mealLabel", "originalFood", "normalizedFood", "quantity", "unit", "frequencyPerWeek"],
+                "required": ["mealLabel", "originalFood", "quantity", "unit", "frequencyPerWeek"],
             },
         },
     },
@@ -51,9 +50,8 @@ SYSTEM_INSTRUCTION = " ".join(
         "Se o jantar disser que segue o almoco com mesmas opcoes e quantidades, replique os itens do almoco.",
         "Use apenas as unidades: g, kg, ml, l ou unit.",
         "Use frequencyPerWeek como numero inteiro entre 1 e 21; default 7.",
-        "normalizedFood deve ser curto e util para compra, sem marcas e sem descricoes longas.",
-        "confidence deve ficar entre 0 e 1.",
-        "ambiguityFlags deve conter marcadores curtos quando houver ambiguidade relevante.",
+        "Nao devolva normalizedFood, confidence ou ambiguityFlags.",
+        "Devolva apenas os itens das refeicoes informadas.",
     ]
 )
 
@@ -64,62 +62,110 @@ def get_llm_status(env=None):
         "configured": bool(env.get("GEMINI_API_KEY")),
         "provider": "gemini",
         "model": env.get("LLM_MODEL") or DEFAULT_MODEL,
+        "fallbackModel": env.get("LLM_FALLBACK_MODEL") or FALLBACK_MODEL,
         "defaultMode": normalize_mode(env.get("LLM_PARSE_MODE")),
         "timeoutSeconds": get_timeout_seconds(env),
+        "thinkingBudget": get_thinking_budget(env),
     }
 
 
-def parse_plan_with_mode(plan_text, mode=None, env=None):
+def parse_plan_with_mode(plan_text, mode=None, env=None, llm_client=None):
     env = env or os.environ
     normalized_mode = normalize_mode(mode or env.get("LLM_PARSE_MODE"))
     llm_status = get_llm_status(env)
+    local_plan = build_heuristic_plan(plan_text)
+    local_plan["parseMetadata"].update(
+        {
+            "sourceChars": len(str(plan_text or "").strip()),
+            "llmModel": llm_status["model"],
+            "thinkingBudget": llm_status["thinkingBudget"],
+        }
+    )
 
     if normalized_mode == "heuristic":
-        return build_heuristic_plan(plan_text)
+        return local_plan
 
     if not llm_status["configured"]:
-        return build_heuristic_plan(plan_text, ["LLM nao configurado; parser local usado."])
+        local_plan["parseWarnings"] = ["LLM nao configurado; parser local usado."]
+        return local_plan
 
     try:
         return parse_plan_with_gemini(
             plan_text=plan_text,
             api_key=env.get("GEMINI_API_KEY"),
             model=llm_status["model"],
+            fallback_model=llm_status["fallbackModel"],
+            local_plan=local_plan,
+            thinking_budget=llm_status["thinkingBudget"],
+            llm_client=llm_client or call_gemini,
         )
     except Exception as error:
-        return build_heuristic_plan(plan_text, [f"LLM falhou e o parser local assumiu: {error}"])
+        local_plan["parseWarnings"] = [f"LLM falhou e o parser local assumiu: {error}"]
+        return local_plan
 
 
-def parse_plan_with_gemini(plan_text, api_key, model):
+def parse_plan_with_gemini(plan_text, api_key, model, fallback_model, local_plan, thinking_budget, llm_client):
     timeout_seconds = get_timeout_seconds()
+    prepared = prepare_llm_meal_blocks(plan_text, local_plan["items"])
+
+    if not prepared["complexMeals"]:
+        local_plan["parseMetadata"].update(
+            {
+                "llmUsed": False,
+                "llmSkipped": True,
+                "preprocessedChars": prepared["preprocessedChars"],
+                "promptChars": 0,
+            }
+        )
+        return local_plan
+
     llm_attempts = 1
     llm_started_at = time.monotonic()
+    used_fallback_model = False
+    active_model = model
+    prompt = build_user_prompt(prepared["preprocessedText"])
     try:
-        payload = call_gemini(
+        payload = llm_client(
             api_key=api_key,
-            model=model,
+            model=active_model,
             system_instruction=SYSTEM_INSTRUCTION,
-            user_prompt=build_user_prompt(plan_text),
+            user_prompt=prompt,
             response_schema=PLAN_RESPONSE_SCHEMA,
             timeout_seconds=timeout_seconds,
+            thinking_budget=thinking_budget,
         )
+        normalized = normalize_llm_payload(payload)
+        if should_retry_with_fallback(normalized, prepared) and active_model != fallback_model:
+            llm_attempts = 2
+            used_fallback_model = True
+            active_model = fallback_model
+            payload = llm_client(
+                api_key=api_key,
+                model=active_model,
+                system_instruction=SYSTEM_INSTRUCTION,
+                user_prompt=prompt,
+                response_schema=PLAN_RESPONSE_SCHEMA,
+                timeout_seconds=timeout_seconds,
+                thinking_budget=thinking_budget,
+            )
+            normalized = normalize_llm_payload(payload)
     except RuntimeError as error:
-        if not should_retry_without_thinking(model, error):
+        if not should_retry_without_thinking(model, error, thinking_budget):
             raise
 
         llm_attempts = 2
-        payload = call_gemini(
+        payload = llm_client(
             api_key=api_key,
-            model=model,
+            model=active_model,
             system_instruction=SYSTEM_INSTRUCTION,
-            user_prompt=build_user_prompt(plan_text),
+            user_prompt=prompt,
             response_schema=PLAN_RESPONSE_SCHEMA,
             timeout_seconds=timeout_seconds,
             thinking_budget=0,
         )
-
-    normalized = normalize_llm_payload(payload)
+        normalized = normalize_llm_payload(payload)
     llm_duration_ms = round((time.monotonic() - llm_started_at) * 1000)
+    merged_items = merge_local_and_llm_items(local_plan["items"], normalized["items"], prepared["complexMealKeys"])
     return normalize_plan(
         {
             "originalText": plan_text,
@@ -130,8 +176,16 @@ def parse_plan_with_gemini(plan_text, api_key, model):
                 "llmDurationMs": llm_duration_ms,
                 "llmAttempts": llm_attempts,
                 "llmTimeoutSeconds": timeout_seconds,
+                "llmModel": active_model,
+                "thinkingBudget": thinking_budget,
+                "promptChars": len(prompt),
+                "sourceChars": prepared["sourceChars"],
+                "preprocessedChars": prepared["preprocessedChars"],
+                "usedFallbackModel": used_fallback_model,
+                "llmUsed": True,
+                "complexMealCount": len(prepared["complexMeals"]),
             },
-            "items": normalized["items"],
+            "items": merged_items,
         },
         default_status="parsed",
         parse_strategy="llm:gemini",
@@ -153,16 +207,11 @@ def normalize_llm_payload(payload):
         items.append(
             {
                 "mealLabel": item.get("mealLabel") or "Plano",
-                "originalFood": item.get("originalFood") or item.get("normalizedFood"),
-                "normalizedFood": item.get("normalizedFood") or item.get("originalFood"),
+                "originalFood": item.get("originalFood"),
                 "quantity": sanitize_number(item.get("quantity"), 1),
                 "unit": item.get("unit") or "unit",
                 "frequencyPerWeek": sanitize_integer(item.get("frequencyPerWeek"), 7),
                 "notes": item.get("notes") or "",
-                "confidence": sanitize_confidence(item.get("confidence")),
-                "ambiguityFlags": [str(flag).strip() for flag in item.get("ambiguityFlags", []) if str(flag).strip()]
-                if isinstance(item.get("ambiguityFlags"), list)
-                else [],
             }
         )
 
@@ -260,9 +309,10 @@ def extract_json_text(text):
 def build_user_prompt(plan_text):
     return "\n\n".join(
         [
-            "Interprete o plano alimentar abaixo e devolva apenas JSON valido conforme o schema.",
+            "Interprete apenas as refeicoes e linhas abaixo e devolva somente JSON valido conforme o schema.",
+            "Priorize sempre a primeira opcao e a primeira alternativa quando houver exclusividade.",
             "Nao invente alimentos ausentes.",
-            "Plano:",
+            "Trecho relevante do plano:",
             plan_text,
         ]
     )
@@ -282,8 +332,53 @@ def get_timeout_seconds(env=None):
     return max(10, numeric)
 
 
-def should_retry_without_thinking(model, error):
-    return model.startswith("gemini-2.5-flash") and "Timeout ao chamar Gemini" in str(error)
+def get_thinking_budget(env=None):
+    env = env or os.environ
+    try:
+        return int(env.get("LLM_THINKING_BUDGET") or DEFAULT_THINKING_BUDGET)
+    except (TypeError, ValueError):
+        return DEFAULT_THINKING_BUDGET
+
+
+def should_retry_without_thinking(model, error, thinking_budget):
+    return model.startswith("gemini-2.5-flash") and thinking_budget != 0 and "Timeout ao chamar Gemini" in str(error)
+
+
+def should_retry_with_fallback(normalized_payload, prepared):
+    if not normalized_payload["items"]:
+        return True
+
+    expected_meals = set(prepared["complexMealKeys"])
+    returned_meals = {strip_accents(item.get("mealLabel")) for item in normalized_payload["items"]}
+    return not expected_meals.issubset(returned_meals)
+
+
+def merge_local_and_llm_items(local_items, llm_items, complex_meal_keys):
+    if not complex_meal_keys:
+        return local_items
+
+    llm_by_meal = {}
+    for item in llm_items:
+        key = strip_accents(item.get("mealLabel"))
+        llm_by_meal.setdefault(key, []).append(item)
+
+    merged = []
+    local_grouped = {}
+    for item in local_items:
+        key = strip_accents(item.get("mealLabel"))
+        local_grouped.setdefault(key, []).append(item)
+
+    for key, items in local_grouped.items():
+        if key in complex_meal_keys:
+            merged.extend(llm_by_meal.get(key) or items)
+        else:
+            merged.extend(items)
+
+    for key in complex_meal_keys:
+        if key not in local_grouped and key in llm_by_meal:
+            merged.extend(llm_by_meal[key])
+
+    return merged
 
 
 def sanitize_number(value, fallback):

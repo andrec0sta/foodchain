@@ -41,6 +41,7 @@ O projeto ja possui um MVP funcional de ponta a ponta para:
 - O parser esta mais robusto para planos estruturados, mas ainda nao cobre toda a variabilidade possivel entre nutricionistas
 - A busca online de embalagens comerciais ainda nao foi implementada
 - A integracao com LLM hoje esta preparada para Gemini e depende de `GEMINI_API_KEY`
+- A estrategia com LLM agora e hibrida: parser local resolve o trivial e o Gemini entra so nos trechos mais ambiguos
 
 ## Como rodar
 
@@ -62,17 +63,18 @@ O backend agora suporta um modo de interpretacao com Gemini. Para habilitar:
 
 ```bash
 export GEMINI_API_KEY="sua-chave"
-export LLM_MODEL="gemini-2.5-flash"
+export LLM_MODEL="gemini-2.5-flash-lite"
 export LLM_PARSE_MODE="auto"
 export LLM_TIMEOUT_SECONDS="60"
+export LLM_THINKING_BUDGET="0"
 npm start
 ```
 
 Modos disponiveis na interface:
 
-- `Automatico`: tenta Gemini e faz fallback para o parser local
+- `Automatico`: usa parser local como base e chama Gemini so para refeicoes complexas
 - `Parser local`: usa apenas heuristicas locais
-- `LLM (Gemini)`: tenta Gemini; se falhar, cai para o parser local e registra aviso
+- `LLM (Gemini)`: usa o pipeline hibrido com Gemini; se falhar, cai para o parser local e registra aviso
 
 ## Arquivos importantes
 

@@ -5,7 +5,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from backend.packaging import generate_weekly_needs, resolve_packages
-from backend.parser import infer_frequency_per_week, parse_plan
+from backend.parser import extract_relevant_meal_blocks, infer_frequency_per_week, parse_plan, prepare_llm_meal_blocks
 
 
 class DomainTests(unittest.TestCase):
@@ -109,6 +109,52 @@ Suplementacao
         self.assertEqual(result[0]["status"], "resolved")
         self.assertEqual(result[0]["recommendation"]["totalQuantity"], 12)
         self.assertEqual(result[0]["overage"], 3)
+
+    def test_parse_plan_detects_simple_equal_lunch_reference_locally(self):
+        plan = parse_plan(
+            """
+Almoco:
+150 g de arroz
+120 g de frango
+
+Jantar:
+Igual almoco
+            """
+        )
+
+        self.assertEqual(
+            [item["mealLabel"] for item in plan["items"]],
+            ["Almoco", "Almoco", "Jantar", "Jantar"],
+        )
+
+    def test_prepare_llm_meal_blocks_removes_irrelevant_sections_and_marks_complex_meals(self):
+        text = """
+PLANO ALIMENTAR
+Nome: Teste
+
+Cafe da manha:
+2 ovos
+
+Almoco:
+Opcao 1:
+- 5 colheres de arroz ou quinoa
+- 1 concha de feijao
+
+Jantar:
+Igual almoco
+
+Suplementacao:
+- Creatina 5g
+        """
+        local_plan = parse_plan(text)
+        prepared = prepare_llm_meal_blocks(text, local_plan["items"])
+        relevant_meals = [block["mealLabel"] for block in extract_relevant_meal_blocks(text)]
+
+        self.assertEqual(relevant_meals, ["Cafe da manha", "Almoco", "Jantar"])
+        self.assertEqual([block["mealLabel"] for block in prepared["complexMeals"]], ["Almoco"])
+        self.assertNotIn("Suplementacao", prepared["preprocessedText"])
+        self.assertIn("Opcao 1:", prepared["preprocessedText"])
+        self.assertNotIn("Igual almoco", prepared["preprocessedText"])
 
 
 if __name__ == "__main__":

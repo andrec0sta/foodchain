@@ -50,6 +50,36 @@ IGNORE_LINE_HINTS = [
     "coe e beba",
 ]
 
+HOUSEHOLD_UNIT_HINTS = [
+    "colher",
+    "colheres",
+    "concha",
+    "conchas",
+    "fatia",
+    "fatias",
+    "pegador",
+    "pegadores",
+    "pote",
+    "potes",
+    "copo",
+    "copos",
+    "file",
+    "dose",
+    "lata",
+    "scoop",
+    "medidor",
+]
+
+MEAL_REFERENCE_HINTS = [
+    "mesmas opcoes",
+    "mesmas opcoes e quantidades",
+    "igual almoco",
+    "igual ao almoco",
+    "mesmo do almoco",
+    "mesma coisa do almoco",
+    "como no almoco",
+]
+
 
 def parse_plan(input_text):
     text = str(input_text or "").replace("\r", "").strip()
@@ -119,6 +149,84 @@ def parse_plan(input_text):
         "basePeriod": "weekly",
         "status": "parsed",
         "items": items,
+    }
+
+
+def extract_relevant_meal_blocks(input_text):
+    text = str(input_text or "").replace("\r", "").strip()
+    lines = preprocess_lines(text)
+
+    blocks = []
+    current_block = None
+    ignored_section = False
+
+    for raw_line in lines:
+        normalized_line = strip_accents(raw_line)
+
+        if is_ignored_section_header(normalized_line):
+            ignored_section = True
+            continue
+
+        meal_candidate = parse_meal_header(raw_line)
+        if meal_candidate:
+            current_block = create_meal_block(meal_candidate)
+            blocks.append(current_block)
+            ignored_section = False
+            continue
+
+        if ignored_section or should_ignore_line(normalized_line):
+            continue
+
+        if current_block is None:
+            current_block = create_meal_block("Plano")
+            blocks.append(current_block)
+
+        current_block["lines"].append(raw_line)
+
+    return [block for block in blocks if block["lines"]]
+
+
+def prepare_llm_meal_blocks(input_text, local_items):
+    text = str(input_text or "").replace("\r", "").strip()
+    blocks = extract_relevant_meal_blocks(text)
+    items_by_meal = {}
+
+    for item in local_items:
+        meal_key = strip_accents(item.get("mealLabel"))
+        items_by_meal.setdefault(meal_key, []).append(item)
+
+    complex_blocks = []
+    for block in blocks:
+        reasons = []
+        local_items_for_meal = items_by_meal.get(block["key"], [])
+        for line in block["lines"]:
+            reasons.extend(detect_complex_line_reasons(line))
+
+        if block["lines"] and not local_items_for_meal:
+            reasons.append("no_local_items")
+
+        if any(requires_review(item) for item in local_items_for_meal):
+            reasons.append("review_required")
+
+        if resolved_by_local_meal_reference(local_items_for_meal):
+            reasons = [reason for reason in reasons if reason != "meal_reference"]
+
+        unique_reasons = sorted(set(reasons))
+        if unique_reasons:
+            complex_blocks.append(
+                {
+                    **block,
+                    "complexityReasons": unique_reasons,
+                }
+            )
+
+    preprocessed_text = "\n\n".join(format_meal_block(block) for block in complex_blocks)
+    return {
+        "sourceChars": len(text),
+        "preprocessedText": preprocessed_text,
+        "preprocessedChars": len(preprocessed_text),
+        "complexMeals": complex_blocks,
+        "complexMealKeys": [block["key"] for block in complex_blocks],
     }
 
 
@@ -198,10 +306,7 @@ def parse_option_number(normalized_line):
 
 def maybe_clone_meal_reference(line, current_meal, meal_templates):
     normalized_line = strip_accents(line)
-    if "mesmas opcoes" not in normalized_line and "mesmas opcoes e quantidades" not in normalized_line:
-        return []
-
-    if "almoco" not in normalized_line:
+    if not references_lunch_pattern(normalized_line):
         return []
 
     source_items = meal_templates.get("almoco", [])
@@ -376,6 +481,63 @@ def cleanup_food_label(food):
     cleaned = re.sub(r"^\s*de\s+", "", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"^[\-: ]+|[\-: ]+$", "", cleaned)
     return cleaned.strip()
+
+
+def create_meal_block(meal_label):
+    return {
+        "mealLabel": meal_label,
+        "key": strip_accents(meal_label),
+        "lines": [],
+    }
+
+
+def format_meal_block(block):
+    return "\n".join([f"{block['mealLabel']}:", *block["lines"]]).strip()
+
+
+def detect_complex_line_reasons(line):
+    normalized = strip_accents(line)
+    reasons = []
+
+    if parse_option_number(normalized) is not None:
+        reasons.append("option_block")
+
+    if re.search(r"\bou\b", normalized):
+        reasons.append("alternative_choice")
+
+    if references_lunch_pattern(normalized):
+        reasons.append("meal_reference")
+
+    if any(hint in normalized for hint in HOUSEHOLD_UNIT_HINTS):
+        reasons.append("household_measure")
+
+    if len(line) > 90:
+        reasons.append("long_line")
+
+    return reasons
+
+
+def requires_review(item):
+    normalized_notes = strip_accents(item.get("notes"))
+    return any(
+        hint in normalized_notes
+        for hint in [
+            "quantidade inferida",
+            "unidade convertida",
+            "linha complexa",
+        ]
+    )
+
+
+def references_lunch_pattern(normalized_line):
+    return "almoco" in normalized_line and any(hint in normalized_line for hint in MEAL_REFERENCE_HINTS)
+
+
+def resolved_by_local_meal_reference(items):
+    if not items:
+        return False
+
+    return all("copiado automaticamente do almoco" in strip_accents(item.get("notes")) for item in items)
 
 
 def should_discard_parsed_item(item):

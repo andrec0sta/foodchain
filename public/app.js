@@ -239,7 +239,7 @@ function applyCapabilities(capabilities) {
   }
 
   if (llm.configured) {
-    dom.llmHint.textContent = `Gemini configurado (${llm.model}). Automatico tenta LLM e cai para o parser local se precisar.`;
+    dom.llmHint.textContent = `Gemini configurado (${llm.model}). Automatico usa parser local como base e chama o LLM so nas refeicoes complexas.`;
   } else {
     dom.llmHint.textContent = "Automatico usa parser local ate configurar GEMINI_API_KEY.";
   }
@@ -261,8 +261,26 @@ function renderPlanSummary() {
   if (state.plan.parseStrategy === "llm:gemini" && metadata.llmDurationMs) {
     parts.push(`Gemini: ${formatNumber(metadata.llmDurationMs)} ms.`);
   }
+  if (metadata.llmModel) {
+    parts.push(`Modelo: ${metadata.llmModel}.`);
+  }
+  if (metadata.thinkingBudget !== undefined) {
+    parts.push(`Thinking budget: ${formatNumber(metadata.thinkingBudget)}.`);
+  }
+  if (metadata.preprocessedChars) {
+    parts.push(`Texto enviado ao LLM: ${formatNumber(metadata.preprocessedChars)} chars.`);
+  }
+  if (metadata.sourceChars) {
+    parts.push(`Fonte original: ${formatNumber(metadata.sourceChars)} chars.`);
+  }
   if (state.plan.parseStrategy === "llm:gemini" && metadata.llmAttempts > 1) {
     parts.push(`Tentativas Gemini: ${formatNumber(metadata.llmAttempts)}.`);
+  }
+  if (metadata.usedFallbackModel) {
+    parts.push("Fallback para modelo mais forte ativado.");
+  }
+  if (metadata.llmSkipped) {
+    parts.push("LLM pulado porque o parser local resolveu as refeicoes sem ambiguidade relevante.");
   }
 
   if (Array.isArray(state.plan.parseWarnings) && state.plan.parseWarnings.length) {
