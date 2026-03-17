@@ -21,6 +21,9 @@ Nesta sessao o projeto saiu de uma ideia documentada para um MVP funcional com i
   - ignorar blocos irrelevantes
   - copiar o almoco para o jantar quando o plano indicar isso
 - Testes automatizados cobrindo parser, consolidacao semanal e resolucao de embalagens
+- Migracao do backend principal para Python
+- Integracao opcional com Gemini para interpretar planos em formatos menos padronizados
+- Seletor de modo de interpretacao na interface com fallback automatico para parser local
 
 ## Estado validado
 
@@ -35,6 +38,7 @@ Nesta sessao o projeto saiu de uma ideia documentada para um MVP funcional com i
 - Nem todo alimento esta suficientemente normalizado para virar item de compra ideal
 - O parser esta mais generico do que antes, mas ainda nao cobre toda a diversidade de formatos reais
 - Fallback online para embalagens comerciais ainda nao foi desenvolvido
+- A camada LLM atual esta focada em Gemini; ainda nao existe abstracao multi-provider
 
 ## Proximas etapas recomendadas
 
@@ -44,6 +48,7 @@ Nesta sessao o projeto saiu de uma ideia documentada para um MVP funcional com i
 4. Adicionar score de confianca e flags de ambiguidade por item
 5. Implementar busca online de embalagens como fallback controlado
 6. Preparar schema canonico para futura etapa com LLM, sem acoplar a implementacao atual
+7. Ampliar a camada LLM para comparar modelos gratuitos e capturar metricas de acerto
 
 ## Observacao de arquitetura
 

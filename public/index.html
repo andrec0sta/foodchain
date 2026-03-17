@@ -51,8 +51,17 @@ somente dias uteis 100 g de feijao"></textarea>
             <span>Ou envie um arquivo</span>
             <input id="plan-file" type="file" accept=".txt,.pdf" />
           </label>
+          <label class="field">
+            <span>Modo de interpretacao</span>
+            <select id="parser-mode">
+              <option value="auto">Automatico</option>
+              <option value="heuristic">Parser local</option>
+              <option value="llm">LLM (Gemini)</option>
+            </select>
+          </label>
           <button id="parse-button" class="primary-button">Extrair itens do plano</button>
-          <p class="helper">PDF usa extracao best-effort nesta versao. Se vier ruim, cole o texto manualmente.</p>
+          <p id="llm-hint" class="helper">Automatico usa parser local ate configurar o Gemini.</p>
+          <p id="parse-summary" class="helper">PDF usa extracao best-effort nesta versao. Se vier ruim, cole o texto manualmente.</p>
         </section>
 
         <section class="panel">

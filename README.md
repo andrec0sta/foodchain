@@ -18,6 +18,7 @@ O projeto ja possui um MVP funcional de ponta a ponta para:
 
 - Ingestao de plano por texto ou upload de arquivo
 - Extracao de texto de PDF com `pypdf` e fallback simples
+- Backend HTTP em Python com parsing local e suporte opcional a LLM
 - Parsing inicial de alimentos, quantidades e frequencia semanal
 - Revisao manual dos itens extraidos
 - Geracao de lista de compras semanal com embalagens comerciais
@@ -39,6 +40,7 @@ O projeto ja possui um MVP funcional de ponta a ponta para:
 - Certos alimentos ainda saem com descricao excessivamente longa e precisam de normalizacao melhor
 - O parser esta mais robusto para planos estruturados, mas ainda nao cobre toda a variabilidade possivel entre nutricionistas
 - A busca online de embalagens comerciais ainda nao foi implementada
+- A integracao com LLM hoje esta preparada para Gemini e depende de `GEMINI_API_KEY`
 
 ## Como rodar
 
@@ -54,20 +56,39 @@ Depois acesse `http://127.0.0.1:3000`.
 npm test
 ```
 
+## LLM opcional
+
+O backend agora suporta um modo de interpretacao com Gemini. Para habilitar:
+
+```bash
+export GEMINI_API_KEY="sua-chave"
+export LLM_MODEL="gemini-2.5-flash"
+export LLM_PARSE_MODE="auto"
+export LLM_TIMEOUT_SECONDS="60"
+npm start
+```
+
+Modos disponiveis na interface:
+
+- `Automatico`: tenta Gemini e faz fallback para o parser local
+- `Parser local`: usa apenas heuristicas locais
+- `LLM (Gemini)`: tenta Gemini; se falhar, cai para o parser local e registra aviso
+
 ## Arquivos importantes
 
-- `server.js`: servidor HTTP, APIs e integracao de ingestao
+- `server.py`: servidor HTTP, APIs e integracao de ingestao
+- `backend/`: parser, normalizacao, LLM, persistencia e resolucao de embalagens em Python
+- `backend/parser.py`: pipeline de limpeza, segmentacao e parsing
+- `backend/packaging.py`: consolidacao semanal e resolucao de embalagens
 - `scripts/extract_pdf.py`: extracao de texto de PDF
-- `src/domain/parser.js`: pipeline de limpeza, segmentacao e parsing
-- `src/domain/packaging.js`: consolidacao semanal e resolucao de embalagens
 - `public/`: interface web responsiva
-- `tests/domain.test.js`: testes do dominio
+- `tests_py/`: testes Python do dominio e da camada LLM
 - `docs/STATUS.md`: resumo da sessao, limitacoes e proximas etapas
 
 ## Estrutura
 
-- `server.js`: servidor HTTP, APIs e servicos de persistencia
-- `src/domain`: parser, normalizacao, catalogo e motor de resolucao de embalagens
+- `server.py`: servidor HTTP, APIs e servicos de persistencia
+- `backend`: parser, normalizacao, catalogo, LLM e motor de resolucao de embalagens
 - `public`: interface web responsiva
 - `docs`: documentacao do produto, arquitetura e desenvolvimento
-- `tests`: testes do dominio
+- `tests_py`: testes Python do dominio

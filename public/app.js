@@ -6,6 +6,7 @@ const state = {
 const dom = {
   planText: document.querySelector("#plan-text"),
   planFile: document.querySelector("#plan-file"),
+  parserMode: document.querySelector("#parser-mode"),
   parseButton: document.querySelector("#parse-button"),
   saveReviewButton: document.querySelector("#save-review-button"),
   generateButton: document.querySelector("#generate-button"),
@@ -16,7 +17,9 @@ const dom = {
   shoppingEmpty: document.querySelector("#shopping-empty"),
   shoppingList: document.querySelector("#shopping-list"),
   rowTemplate: document.querySelector("#row-template"),
-  statusBadge: document.querySelector("#status-badge")
+  statusBadge: document.querySelector("#status-badge"),
+  llmHint: document.querySelector("#llm-hint"),
+  parseSummary: document.querySelector("#parse-summary")
 };
 
 bootstrap();
@@ -25,11 +28,15 @@ async function bootstrap() {
   bindEvents();
   const response = await fetch("/api/state");
   const data = await response.json();
+  applyCapabilities(data.capabilities);
 
   if (data.lastPlan) {
     state.plan = data.lastPlan;
     renderPlan();
+    renderPlanSummary();
     setStatus("Plano carregado", false);
+  } else {
+    renderPlanSummary();
   }
 }
 
@@ -58,6 +65,7 @@ async function onParse() {
       payload.mimeType = file.type;
       payload.fileContentBase64 = content;
     }
+    payload.parserMode = dom.parserMode.value;
 
     const response = await fetch("/api/plan/parse", {
       method: "POST",
@@ -74,6 +82,7 @@ async function onParse() {
     state.shoppingList = null;
     renderPlan();
     renderShoppingList([]);
+    renderPlanSummary();
     setStatus("Plano extraido. Revise os itens.", false);
   } catch (error) {
     setStatus(error.message, true);
@@ -97,6 +106,7 @@ async function onSaveReview() {
 
     state.plan = data.plan;
     renderPlan();
+    renderPlanSummary();
     setStatus("Revisao salva.", false);
   } catch (error) {
     setStatus(error.message, true);
@@ -121,6 +131,7 @@ async function onGenerateShoppingList() {
     state.plan = data.plan;
     state.shoppingList = data.shoppingList;
     renderPlan();
+    renderPlanSummary();
     renderShoppingList(data.shoppingList);
     setStatus("Lista semanal pronta.", false);
   } catch (error) {
@@ -213,6 +224,52 @@ function ensurePlan() {
   if (!state.plan) {
     throw new Error("Insira um plano primeiro.");
   }
+}
+
+function applyCapabilities(capabilities) {
+  const llm = capabilities?.llm || {};
+  const llmOption = dom.parserMode.querySelector("option[value='llm']");
+
+  if (llmOption) {
+    llmOption.disabled = !llm.configured;
+  }
+
+  if (!llm.configured && dom.parserMode.value === "llm") {
+    dom.parserMode.value = "auto";
+  }
+
+  if (llm.configured) {
+    dom.llmHint.textContent = `Gemini configurado (${llm.model}). Automatico tenta LLM e cai para o parser local se precisar.`;
+  } else {
+    dom.llmHint.textContent = "Automatico usa parser local ate configurar GEMINI_API_KEY.";
+  }
+}
+
+function renderPlanSummary() {
+  if (!state.plan) {
+    dom.parseSummary.textContent = "PDF usa extracao best-effort nesta versao. Se vier ruim, cole o texto manualmente.";
+    return;
+  }
+
+  const parts = [];
+  parts.push(state.plan.parseStrategy === "llm:gemini" ? "Interpretado com Gemini." : "Interpretado com parser local.");
+
+  const metadata = state.plan.parseMetadata || {};
+  if (metadata.totalDurationMs) {
+    parts.push(`Tempo total: ${formatNumber(metadata.totalDurationMs)} ms.`);
+  }
+  if (state.plan.parseStrategy === "llm:gemini" && metadata.llmDurationMs) {
+    parts.push(`Gemini: ${formatNumber(metadata.llmDurationMs)} ms.`);
+  }
+  if (state.plan.parseStrategy === "llm:gemini" && metadata.llmAttempts > 1) {
+    parts.push(`Tentativas Gemini: ${formatNumber(metadata.llmAttempts)}.`);
+  }
+
+  if (Array.isArray(state.plan.parseWarnings) && state.plan.parseWarnings.length) {
+    parts.push(state.plan.parseWarnings.join(" "));
+  }
+
+  dom.parseSummary.textContent = parts.join(" ");
 }
 
 function setStatus(message, isPending) {
