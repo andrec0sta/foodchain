@@ -76,6 +76,42 @@ Modos disponiveis na interface:
 - `Parser local`: usa apenas heuristicas locais
 - `LLM (Gemini)`: usa o pipeline hibrido com Gemini; se falhar, cai para o parser local e registra aviso
 
+## Benchmark confiavel entre modelos
+
+Nao use `npm test` para comparar `gemini-2.5-flash-lite` vs `gemini-2.5-flash`. Os testes automatizados do projeto usam mocks e devem continuar rapidos e deterministas.
+
+Para comparacao ao vivo entre modelos, use o benchmark dedicado:
+
+```bash
+export GEMINI_API_KEY="sua-chave"
+python3 scripts/benchmark_llm.py \
+  --runs 2 \
+  --warmups 0 \
+  --pause-ms 13000 \
+  --timeout-seconds 120 \
+  --output tmp/llm-benchmark-safe.json
+```
+
+Esse script:
+
+- roda os modelos em round-robin para reduzir viés temporal
+- desabilita fallback entre modelos durante a comparacao
+- separa benchmark real de rede dos testes unitarios
+- salva um relatorio JSON com latencia, erros e consistencia de saida
+- no free tier, pausas maiores entre chamadas ajudam a evitar `429`
+
+Para incluir o PDF real do projeto:
+
+```bash
+python3 scripts/benchmark_llm.py \
+  --pdf-file "samples/Plano Nutricional André Costa - Junho.pdf" \
+  --runs 2 \
+  --warmups 0 \
+  --pause-ms 13000 \
+  --timeout-seconds 120 \
+  --output tmp/llm-benchmark-pdf-safe.json
+```
+
 ## Arquivos importantes
 
 - `server.py`: servidor HTTP, APIs e integracao de ingestao

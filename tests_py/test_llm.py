@@ -120,6 +120,43 @@ Opcao 1:
         self.assertTrue(plan["parseMetadata"]["usedFallbackModel"])
         self.assertEqual(plan["parseMetadata"]["llmModel"], "gemini-2.5-flash")
 
+    def test_parse_plan_with_mode_respects_timeout_from_env(self):
+        captured_timeout = None
+
+        def fake_llm_client(**kwargs):
+            nonlocal captured_timeout
+            captured_timeout = kwargs["timeout_seconds"]
+            return {
+                "items": [
+                    {
+                        "mealLabel": "Almoco",
+                        "originalFood": "frango",
+                        "quantity": 120,
+                        "unit": "g",
+                        "frequencyPerWeek": 7,
+                        "notes": "",
+                    }
+                ]
+            }
+
+        parse_plan_with_mode(
+            """
+Almoco:
+Opcao 1:
+- 5 colheres de arroz ou quinoa
+- 120 g de frango
+            """,
+            mode="llm",
+            env={
+                "GEMINI_API_KEY": "test-key",
+                "LLM_MODEL": "gemini-2.5-flash-lite",
+                "LLM_TIMEOUT_SECONDS": "123",
+            },
+            llm_client=fake_llm_client,
+        )
+
+        self.assertEqual(captured_timeout, 123)
+
 
 if __name__ == "__main__":
     unittest.main()

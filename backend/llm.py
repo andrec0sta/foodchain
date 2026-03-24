@@ -96,6 +96,7 @@ def parse_plan_with_mode(plan_text, mode=None, env=None, llm_client=None):
             model=llm_status["model"],
             fallback_model=llm_status["fallbackModel"],
             local_plan=local_plan,
+            timeout_seconds=llm_status["timeoutSeconds"],
             thinking_budget=llm_status["thinkingBudget"],
             llm_client=llm_client or call_gemini,
         )
@@ -104,8 +105,16 @@ def parse_plan_with_mode(plan_text, mode=None, env=None, llm_client=None):
         return local_plan
 
 
-def parse_plan_with_gemini(plan_text, api_key, model, fallback_model, local_plan, thinking_budget, llm_client):
-    timeout_seconds = get_timeout_seconds()
+def parse_plan_with_gemini(
+    plan_text,
+    api_key,
+    model,
+    fallback_model,
+    local_plan,
+    timeout_seconds,
+    thinking_budget,
+    llm_client,
+):
     prepared = prepare_llm_meal_blocks(plan_text, local_plan["items"])
 
     if not prepared["complexMeals"]:
